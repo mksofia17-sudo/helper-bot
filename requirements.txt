@@ -1,0 +1,10 @@
+aiogram==2.25.1
+aiohttp==3.8.6
+mutagen
+pydub
+SpeechRecognition
+openai
+python-dotenv
+yt-dlp
+requests
+cryptography
