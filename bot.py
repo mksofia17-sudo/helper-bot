@@ -1,9 +1,17 @@
-from pyrogram import Client, filters
-import requests
-import base64
-import os
+import asyncio
+import logging
+import sqlite3
 import json
-from datetime import datetime
+import os
+import base64
+from datetime import datetime, timedelta
+import random
+import requests
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ============================================
 # 🔑 ВСЕ ТВОИ КЛЮЧИ
@@ -17,12 +25,9 @@ GIGACHAT_AUTH_KEY = "MDE5ZmJlYzUtYzA0Mi03ZWY4LWI3ZmYtOWNjYmE0ODZhMWE0OjRmY2Y4NTE
 # 🤖 НАСТРОЙКА БОТА
 # ============================================
 
-app = Client(
-    "helper_bot",
-    bot_token=TOKEN,
-    api_id=6,  # для ботов можно использовать 6
-    api_hash=""
-)
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
 # ============================================
 # 🌐 ФУНКЦИИ ДЛЯ GIGACHAT
@@ -67,65 +72,102 @@ def ask_giga(question, token):
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
 
+def ask_giga_with_image(question, image_path, token):
+    try:
+        with open(image_path, "rb") as f:
+            image_data = f.read()
+            image_base64 = base64.b64encode(image_data).decode('utf-8')
+        
+        url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+        data = {
+            "model": "GigaChat",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                    ]
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1000
+        }
+        response = requests.post(url, headers=headers, json=data, verify=False, timeout=120)
+        if response.status_code == 200:
+            result = response.json()
+            return result.get("choices", [{}])[0].get("message", {}).get("content", "Нет ответа")
+        return f"❌ Ошибка: {response.status_code}"
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
+
 # ============================================
-# 📨 ОБРАБОТЧИКИ СООБЩЕНИЙ
+# 📨 ОБРАБОТЧИКИ
 # ============================================
 
-@app.on_message(filters.command("start"))
-async def start(client, message):
-    await message.reply("🤖 Привет! Я Helper. Отправь фото — решу задачу!")
+@dp.message_handler(commands=['start'])
+async def start(message: types.Message):
+    user_name = message.from_user.first_name
+    await message.reply(
+        f"🤖 Привет, {user_name}!\n"
+        f"Я Helper — твой личный помощник!\n\n"
+        f"📸 Отправь фото — я решу задачу!\n"
+        f"💬 Напиши любой вопрос — я отвечу!"
+    )
 
-@app.on_message(filters.photo)
-async def handle_photo(client, message):
-    await message.reply("📸 Получил фото! Анализирую...")
+@dp.message_handler(content_types=['photo'])
+async def handle_photo(message: types.Message):
+    await message.reply("📸 Анализирую фото через GigaChat...")
     
     token = get_giga_token()
     if not token:
-        await message.reply("❌ Ошибка токена GigaChat")
+        await message.reply("❌ Не удалось получить токен GigaChat")
         return
     
-    # Скачиваем фото
-    file_path = await client.download_media(message.photo)
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    file_path = f"photos/{photo.file_id}.jpg"
+    await bot.download_file(file.file_path, file_path)
     
-    with open(file_path, "rb") as f:
-        image_data = f.read()
-        image_base64 = base64.b64encode(image_data).decode('utf-8')
+    answer = ask_giga_with_image("Реши задачу на фото. Ответ на русском.", file_path, token)
     
-    os.remove(file_path)
+    if os.path.exists(file_path):
+        os.remove(file_path)
     
-    url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": f"Bearer {token}"
-    }
-    data = {
-        "model": "GigaChat",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Реши задачу на фото. Ответ на русском."},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]
-            }
-        ],
-        "temperature": 0.7,
-        "max_tokens": 1000
-    }
+    await message.reply(f"🧠 {answer}")
+
+@dp.message_handler()
+async def handle_text(message: types.Message):
+    await message.reply("🤔 Думаю...")
     
-    response = requests.post(url, headers=headers, json=data, verify=False, timeout=120)
-    if response.status_code == 200:
-        result = response.json()
-        answer = result.get("choices", [{}])[0].get("message", {}).get("content", "Нет ответа")
-        await message.reply(f"🧠 {answer}")
-    else:
-        await message.reply(f"❌ Ошибка GigaChat: {response.status_code}")
+    token = get_giga_token()
+    if not token:
+        await message.reply("❌ Не удалось получить токен GigaChat")
+        return
+    
+    answer = ask_giga(message.text, token)
+    await message.reply(answer)
 
 # ============================================
 # 🚀 ЗАПУСК
 # ============================================
 
-if __name__ == "__main__":
-    print("🤖 Бот запущен!")
-    app.run()
+if __name__ == '__main__':
+    os.makedirs('photos', exist_ok=True)
+    os.makedirs('voices', exist_ok=True)
+    os.makedirs('audios', exist_ok=True)
+    os.makedirs('music', exist_ok=True)
+    
+    print("="*50)
+    print("🤖 БОТ HELPER ЗАПУЩЕН!")
+    print("="*50)
+    print("✅ Все ключи установлены")
+    print("✅ Бот работает на Render")
+    print("="*50)
+    
+    executor.start_polling(dp, skip_updates=True)
