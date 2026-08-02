@@ -1,33 +1,25 @@
-import asyncio
-import logging
-import sqlite3
-import json
-import os
-import base64
-from datetime import datetime, timedelta
-import random
+from pyrogram import Client, filters
 import requests
-
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import base64
+import os
 
 # ============================================
-# 🔑 ВСЕ ТВОИ КЛЮЧИ
+# 🔑 КЛЮЧИ
 # ============================================
 
 TOKEN = "8676324805:AAHfJbQ5nYbwI8-ljdo9nfIZlifU9aPjtHg"
-SHAZAM_API_KEY = "8937f67c8cmshbd3264f29d90e1cp1bb54cjsn9edcf12be753"
 GIGACHAT_AUTH_KEY = "MDE5ZmJlYzUtYzA0Mi03ZWY4LWI3ZmYtOWNjYmE0ODZhMWE0OjRmY2Y4NTE4LWUzYzgtNDcyYi1hM2FjLTdkYzJhMThhMzc5Yw=="
 
 # ============================================
 # 🤖 НАСТРОЙКА БОТА
 # ============================================
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
+app = Client(
+    "helper_bot",
+    bot_token=TOKEN,
+    api_id=6,
+    api_hash=""
+)
 
 # ============================================
 # 🌐 ФУНКЦИИ ДЛЯ GIGACHAT
@@ -110,18 +102,18 @@ def ask_giga_with_image(question, image_path, token):
 # 📨 ОБРАБОТЧИКИ
 # ============================================
 
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
-    user_name = message.from_user.first_name
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    name = message.from_user.first_name
     await message.reply(
-        f"🤖 Привет, {user_name}!\n"
+        f"🤖 Привет, {name}!\n"
         f"Я Helper — твой личный помощник!\n\n"
         f"📸 Отправь фото — я решу задачу!\n"
         f"💬 Напиши любой вопрос — я отвечу!"
     )
 
-@dp.message_handler(content_types=['photo'])
-async def handle_photo(message: types.Message):
+@app.on_message(filters.photo)
+async def handle_photo(client, message):
     await message.reply("📸 Анализирую фото через GigaChat...")
     
     token = get_giga_token()
@@ -129,10 +121,7 @@ async def handle_photo(message: types.Message):
         await message.reply("❌ Не удалось получить токен GigaChat")
         return
     
-    photo = message.photo[-1]
-    file = await bot.get_file(photo.file_id)
-    file_path = f"photos/{photo.file_id}.jpg"
-    await bot.download_file(file.file_path, file_path)
+    file_path = await client.download_media(message.photo)
     
     answer = ask_giga_with_image("Реши задачу на фото. Ответ на русском.", file_path, token)
     
@@ -141,8 +130,8 @@ async def handle_photo(message: types.Message):
     
     await message.reply(f"🧠 {answer}")
 
-@dp.message_handler()
-async def handle_text(message: types.Message):
+@app.on_message(filters.text & ~filters.command("start"))
+async def handle_text(client, message):
     await message.reply("🤔 Думаю...")
     
     token = get_giga_token()
@@ -157,17 +146,12 @@ async def handle_text(message: types.Message):
 # 🚀 ЗАПУСК
 # ============================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     os.makedirs('photos', exist_ok=True)
-    os.makedirs('voices', exist_ok=True)
-    os.makedirs('audios', exist_ok=True)
-    os.makedirs('music', exist_ok=True)
-    
     print("="*50)
     print("🤖 БОТ HELPER ЗАПУЩЕН!")
     print("="*50)
     print("✅ Все ключи установлены")
     print("✅ Бот работает на Render")
     print("="*50)
-    
-    executor.start_polling(dp, skip_updates=True)
+    app.run()
