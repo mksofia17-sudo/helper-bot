@@ -1,5 +1,4 @@
-aiogram==2.25.1
-httpx
+pyrogram==2.0.106
 mutagen
 pydub
 SpeechRecognition
